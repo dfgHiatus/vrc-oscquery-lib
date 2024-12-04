@@ -13,27 +13,13 @@ namespace VRC.OSCQuery
         private ServiceDiscovery _discovery;
         private MulticastService _mdns;
         private static ILogger<OSCQueryService> Logger;
-        
+
         // Store discovered services
         private readonly HashSet<OSCQueryServiceProfile> _oscQueryServices = new HashSet<OSCQueryServiceProfile>();
         private readonly HashSet<OSCQueryServiceProfile> _oscServices = new HashSet<OSCQueryServiceProfile>();
-        
-        public HashSet<OSCQueryServiceProfile> GetOSCQueryServices()
-        {
-            lock (_oscQueryServices)
-            {
-                var clone = new HashSet<OSCQueryServiceProfile>(_oscQueryServices);
-                return clone;
-            }
-        }
-        public HashSet<OSCQueryServiceProfile> GetOSCServices()
-        {
-            lock (_oscServices)
-            {
-                var clone = new HashSet<OSCQueryServiceProfile>(_oscServices);
-                return clone;
-            }
-        }
+
+        public HashSet<OSCQueryServiceProfile> GetOSCQueryServices() => _oscQueryServices;
+        public HashSet<OSCQueryServiceProfile> GetOSCServices() => _oscServices;
 
         public void Dispose()
         {
@@ -50,30 +36,30 @@ namespace VRC.OSCQuery
         public MeaModDiscovery(ILogger<OSCQueryService> logger = null)
         {
             Logger = logger ?? new NullLogger<OSCQueryService>();
-            
+
             _mdns = new MulticastService();
             _mdns.UseIpv6 = false;
             _mdns.IgnoreDuplicateMessages = true;
-            
+
             _discovery = new ServiceDiscovery(_mdns);
-            
+
             // Query for OSC and OSCQuery services on every network interface
             _mdns.NetworkInterfaceDiscovered += (s, e) =>
             {
                 RefreshServices();
             };
-            
+
             // Callback invoked when the above query is answered
             _mdns.AnswerReceived += OnRemoteServiceInfo;
             _mdns.Start();
         }
-        
+
         public void RefreshServices()
         {
             _mdns.SendQuery(OSCQueryService._localOscUdpServiceName);
             _mdns.SendQuery(OSCQueryService._localOscJsonServiceName);
         }
-        
+
         public event Action<OSCQueryServiceProfile> OnOscServiceAdded;
         public event Action<OSCQueryServiceProfile> OnOscQueryServiceAdded;
         public event Action<string> OnOscServiceRemoved;
@@ -85,7 +71,7 @@ namespace VRC.OSCQuery
             var meaProfile = new ServiceProfile(profile.name, profile.GetServiceTypeString(), (ushort)profile.port, new[] { profile.address });
             _discovery.Advertise(meaProfile);
             _profiles.Add(profile, meaProfile);
-            
+
             Logger.LogInformation($"Advertising Service {profile.name} of type {profile.serviceType} on {profile.port}");
         }
 
@@ -107,7 +93,7 @@ namespace VRC.OSCQuery
         private void OnRemoteServiceInfo(object sender, MessageEventArgs eventArgs)
         {
             var response = eventArgs.Message;
-            
+
             try
             {
                 // Check whether this service matches OSCJSON or OSC services for which we're looking
@@ -121,7 +107,7 @@ namespace VRC.OSCQuery
                 {
                     try
                     {
-                        foreach (SRVRecord record in response.AdditionalRecords.OfType<SRVRecord>())
+                        foreach (SRVRecord record in response.AdditionalRecords.OfType<SRVRecord>().Concat(response.Answers.OfType<SRVRecord>()))
                         {
                             if (record.TTL == TimeSpan.Zero)
                                 RemoveMatchedService(record);
@@ -150,8 +136,8 @@ namespace VRC.OSCQuery
             var instanceName = domainName[0];
 
             var serviceName = string.Join(".", domainName.Skip(1));
-            var ips = response.AdditionalRecords.OfType<ARecord>().Select(r => r.Address);
-                
+            var ips = response.AdditionalRecords.OfType<ARecord>().Concat(response.Answers.OfType<ARecord>()).Select(r => r.Address);
+
             var ipAddressList = ips.ToList();
             var profile = new ServiceProfile(instanceName, serviceName, srvRecord.Port, ipAddressList);
 
@@ -159,17 +145,10 @@ namespace VRC.OSCQuery
             if (string.Compare(serviceName, OSCQueryService._localOscUdpServiceName, StringComparison.Ordinal) == 0 && !_profiles.ContainsValue(profile))
             {
                 // Make sure there's not already a service with the same name
-                OSCQueryServiceProfile p = null;
-                lock (_oscServices)
+                if (_oscServices.All(p => p.name != profile.InstanceName))
                 {
-                    if (_oscServices.All(p => p.name != profile.InstanceName))
-                    {
-                        p = new OSCQueryServiceProfile(instanceName, ipAddressList.First(), port, OSCQueryServiceProfile.ServiceType.OSC);
-                        _oscServices.Add(p);
-                    }
-                }
-                if (p != null)
-                {
+                    var p = new OSCQueryServiceProfile(instanceName, ipAddressList.First(), port, OSCQueryServiceProfile.ServiceType.OSC);
+                    _oscServices.Add(p);
                     OnOscServiceAdded?.Invoke(p);
                 }
             }
@@ -177,17 +156,10 @@ namespace VRC.OSCQuery
             else if (string.Compare(serviceName, OSCQueryService._localOscJsonServiceName, StringComparison.Ordinal) == 0 && !_profiles.ContainsValue(profile))
             {
                 // Make sure there's not already a service with the same name
-                OSCQueryServiceProfile p = null;
-                lock (_oscQueryServices)
+                if (_oscQueryServices.All(p => !p.name.Equals(profile.InstanceName)))
                 {
-                    if (_oscQueryServices.All(p => !p.name.Equals(profile.InstanceName)))
-                    {
-                        p = new OSCQueryServiceProfile(instanceName, ipAddressList.First(), port, OSCQueryServiceProfile.ServiceType.OSCQuery);
-                        _oscQueryServices.Add(p);
-                    }
-                }
-                if (p != null)
-                {
+                    var p = new OSCQueryServiceProfile(instanceName, ipAddressList.First(), port, OSCQueryServiceProfile.ServiceType.OSCQuery);
+                    _oscQueryServices.Add(p);
                     OnOscQueryServiceAdded?.Invoke(p);
                 }
             }
@@ -202,19 +174,13 @@ namespace VRC.OSCQuery
             // If this is an OSC service, remove it from the OSC collection
             if (string.Compare(serviceName, OSCQueryService._localOscUdpServiceName, StringComparison.Ordinal) == 0)
             {
-                lock (_oscServices)
-                {
-                    _oscServices.RemoveWhere(p => p.name == instanceName);
-                }
+                _oscServices.RemoveWhere(p => p.name == instanceName);
                 OnOscServiceRemoved?.Invoke(instanceName);
             }
             // If this is an OSCQuery service, remove it from the OSCQuery collection
             else if (string.Compare(serviceName, OSCQueryService._localOscJsonServiceName, StringComparison.Ordinal) == 0)
             {
-                lock (_oscQueryServices)
-                {
-                    _oscQueryServices.RemoveWhere(p => p.name == instanceName);
-                }
+                _oscQueryServices.RemoveWhere(p => p.name == instanceName);
                 OnOscQueryServiceRemoved?.Invoke(instanceName);
             }
         }
