@@ -10,7 +10,7 @@ namespace VRC.OSCQuery
 {
     public static class Extensions
     {
-        private static readonly HttpClient _client = new HttpClient();
+        private static readonly HttpClient Client = new HttpClient();
         
         public static IEnumerable<T> SkipLast<T>(this IEnumerable<T> source, int count)
         {
@@ -43,7 +43,7 @@ namespace VRC.OSCQuery
             using (var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp))
             {
                 socket.Bind(DefaultLoopbackEndpoint);
-                return ((IPEndPoint)socket.LocalEndPoint).Port;
+                return ((IPEndPoint)socket.LocalEndPoint!).Port;
             }
         }
         
@@ -52,13 +52,13 @@ namespace VRC.OSCQuery
             using (var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
             {
                 socket.Bind(DefaultLoopbackEndpoint);
-                return ((IPEndPoint)socket.LocalEndPoint).Port;
+                return ((IPEndPoint)socket.LocalEndPoint!).Port;
             }
         }
 
-        public static async Task<OSCQueryRootNode> GetOSCTree(IPAddress ip, int port)
+        public static async Task<OSCQueryRootNode> GetOscTree(IPAddress ip, int port)
         {
-            var response = await _client.GetAsync($"http://{ip}:{port}/");
+            var response = await Client.GetAsync($"http://{ip}:{port}/");
             if (!response.IsSuccessStatusCode)
             {
                 return null;
@@ -72,7 +72,7 @@ namespace VRC.OSCQuery
 
         public static async Task<HostInfo> GetHostInfo(IPAddress address, int port)
         {
-            var response = await _client.GetAsync($"http://{address}:{port}?{Attributes.HOST_INFO}");
+            var response = await Client.GetAsync($"http://{address}:{port}?{Attributes.HOST_INFO}");
             var hostInfoString = await response.Content.ReadAsStringAsync();
             return JsonConvert.DeserializeObject<HostInfo>(hostInfoString);
         }
